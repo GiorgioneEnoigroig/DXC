@@ -1,0 +1,213 @@
+CREATE OR REPLACE PROCEDURE M4PR_HCM_PAYROLL_RECIBOS(
+                            pidsociedad     varchar2,
+                            pfecpago        date,
+                            pidempresa      varchar2,
+                            pidregion       varchar2,
+                            pidempleado     varchar2,
+                            psource         varchar2)
+   /* ____________________________________________________________________________________________________________________
+      --.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.
+       objetivo       : Este procedimiento generará la información de control de los timbrados y la póliza contable electrónica
+       tabla de salida: insercion en m4_sat_control y m4t_sat_contab_elec
+       creado por     : javier ramirez hernandez
+       fecha          : marzo 2015
+       características: 
+             > parametro psource puede tomar valores (NOMINA, FINIQUITO, CANCELACION, REPROCESO, LIBRE)
+                a) si NOMINA - revisar que no este cerrado seguimiento nomina
+                b) si FINIQUITO - revisar que no este cerrado seguimiento finiquito
+                c) si CANCELACION - revisar existencia en admin_rec_rev y que CTRL.ESTADO != CANCELADO
+                d) si REPROCESO - revisar no existencia
+                e) si LIBRE - debe existir miscelaneo30 y cambiar CTRL.ESTADO con RETIMBRADO
+     _____________________________________________________________________________________________________________________*/
+is
+   ncod_error          number  (10);                                                                /* código de error */
+   stabla              varchar (2000);                                                             /* tabla con error */
+   stabla1             varchar (2000);  
+   auxid_empleado      varchar2 (10);                                                 /* tabla con error */
+   xubicamensaje      varchar2 (50);
+   auxid_unidad         varchar2 (10);
+   
+   cursor cur_empnom (vId_empleado varchar2, vid_unidad varchar2) is
+      select distinct rl.id_sociedad,
+             rl.id_empleado,
+             'Payslip Third Party' TipoDocto,
+             rl.fec_pago,
+             add_months(rl.fec_pago, 24) Fec_fin,
+             substr(rl.id_unidad,1,3) empresa,
+             em.id_pais,
+--             em.id_pais || '_' || substr(rl.id_unidad,1,3) || '_' || rl.id_empleado || '_' || to_char(rl.fec_pago, 'ddmmyyyy')||'.pdf' nom_arcivo
+          rep.NOMENCLATURA || '_' || em.id_pais || '_' || substr(rl.id_unidad,1,3) || '_' || rl.id_empleado || '_' ||  upper(to_char(rl.fec_pago, 'yyyy')) || upper(to_char(rl.fec_pago, 'Mon','nls_date_language=spanish')) || '-' || upper(pag.NOM_IDENT_REP)||lpad(trim(nvl(periodo_anio_proceso,'')),2,'0') ||'.pdf' nom_arcivo
+        from m4_acumulado_rl rl, m4_empresas em, M4_HIST_PAGAS_TIP_SALAR tip_sal, M4_HIST_PAGAS pag, M4_NOMEC_REPORTES rep          
+       where rl.id_sociedad  ='01'
+             and rl.fec_pago = pfecpago
+             and rl.ind_finiquit = 0
+             and rl.ind_indemniz = 0
+             and rl.id_empleado like vId_empleado
+             and rl.id_empleado not like 'JB%'
+             and rl.id_unidad like auxid_unidad
+             and substr(rl.id_unidad,1,3) = em.id_empresa
+             and rl.fec_pago = tip_sal.fec_paga
+             and tip_sal.fec_paga = pag.fec_paga
+             and em.id_empresa = rep.id_empresa
+             and rep.reporte  = Decode(psource, 'N', 'RECIBOS', 'F', 'RECIBOS', 'R', 'INGRESOS_ANUALES');
+
+   cursor cur_empnomfin (vId_empleado varchar2, vid_unidad varchar2) is
+      select rl.id_sociedad,
+             rl.id_empleado,
+             'Payslip Third Party' TipoDocto,
+             rl.fec_pago,
+             add_months(rl.fec_pago, 24) Fec_fin,
+             substr(rl.id_unidad,1,3) empresa,
+             em.id_pais,
+--             em.id_pais || '_' || substr(rl.id_unidad,1,3) || '_' || rl.id_empleado || '_' || to_char(rl.fec_pago, 'ddmmyyyy')||'.pdf' nom_arcivo
+          rep.NOMENCLATURA || '_' || em.id_pais || '_' || substr(rl.id_unidad,1,3) || '_' || rl.id_empleado || '_' || upper(to_char(rl.fec_pago, 'yyyymon')) || '-' || upper(pag.NOM_IDENT_REP)||lpad(trim(nvl(periodo_anio_proceso,'')),2,'0') ||'.pdf' nom_arcivo
+        from m4_acumulado_rl rl, m4_empresas em, M4_HIST_PAGAS_TIP_SALAR tip_sal, M4_HIST_PAGAS pag, M4_NOMEC_REPORTES rep          
+       where rl.id_sociedad  ='01'
+             and rl.fec_pago = pfecpago
+             and (rl.ind_finiquit = 1 OR  rl.ind_indemniz = 1)
+             and rl.id_empleado like vId_empleado
+             and rl.id_empleado not like 'JB%'
+             and rl.id_unidad like auxid_unidad
+             and substr(rl.id_unidad,1,3) = em.id_empresa
+             and rl.fec_pago = tip_sal.fec_paga
+             and tip_sal.fec_paga = pag.fec_paga
+             and em.id_empresa = rep.id_empresa
+             and rep.reporte  = Decode(psource, 'N', 'RECIBOS', 'F', 'RECIBOS', 'R', 'INGRESOS_ANUALES');
+                            
+--      cursor cur_empret (vId_empleado varchar2, vid_unidad varchar2) is
+--      select a.id_sociedad,
+--             a.id_empleado,
+--             'Certificado Ing Ret' TipoDocto,
+--             a.cas_30_fec_ini,
+--             add_months(a.cas_30_fec_ini, 24) Fec_fin,
+--             a.id_empresa,
+--             em.id_pais,
+--             rep.nomenclatura || '_'|| em.id_pais || '_' || a.id_empresa || '_' || a.id_empleado || '_' || a.anio ||'.pdf' nom_archivo
+--        from M4_CERTIF_ING_RET_COL a, m4_empresas em, m4_nomec_reportes rep
+--       where a.id_sociedad  ='01'
+--             and a.cas_30_fec_ini  >= pfecpago
+--             and a.id_empleado like vId_empleado
+--             and a.id_unidad like vid_unidad
+--             and a.id_empresa = em.id_empresa
+--             and em.id_pais = rep.id_pais
+--             and em.id_empresa = rep.id_empresa
+--             and rep.reporte  = Decode(psource, 'N', 'RECIBOS', 'F', 'RECIBOS', 'R', 'INGRESOS_ANUALES');
+  
+     cursor cur_emprmx (vId_empleado varchar2, vid_unidad varchar2) is
+      select a.id_sociedad,
+             a.id_empleado,
+             'Constancia de Percep' TipoDocto,
+             a.FEC_INI_37,
+             add_months(a.FEC_INI_37, 24) Fec_fin,
+             a.id_empresa,
+             em.id_pais,
+             rep.nomenclatura || '_'|| em.id_pais || '_' || a.id_empresa || '_' || a.id_empleado || '_' || to_char(a.FEC_INI_37, 'yyyy') ||'.pdf' nom_archivo
+        from M4_CONSTANCIAS_F37_06 a, m4_empresas em, m4_nomec_reportes rep
+       where a.id_sociedad  ='01'
+             and a.FEC_INI_37  >= pfecpago
+             and a.id_empleado like vId_empleado
+             and a.id_empleado not like 'JB%'
+             and a.id_unidad like vid_unidad
+             and a.id_empresa = em.id_empresa
+             and em.id_pais = rep.id_pais
+             and em.id_empresa = rep.id_empresa
+             and rep.reporte  = Decode(psource, 'N', 'RECIBOS', 'F', 'RECIBOS', 'R', 'INGRESOS_ANUALES');
+
+   
+   dat_empnom          cur_empnom%rowtype;
+   dat_empnomfin       cur_empnomfin%rowtype;   
+--   dat_empret          cur_empret%rowtype;
+   dat_empret_mx      cur_emprmx%rowtype;  
+   Vid_pais            varchar2(5);              
+   
+begin
+   xubicamensaje := 'Iniciando proceso m4pr_sat_contabilidad_elec:';
+   dbms_output.put_line(xubicamensaje || sysdate);
+   
+   if pidempleado is null then 
+      auxid_empleado := '%';
+   else                  
+      auxid_empleado:= pidempleado;
+   end if;         
+   if pidempresa is not null and pidregion is null then
+         auxid_unidad :=  pidempresa || '%';
+   end if;
+   if pidempresa is null and pidregion is not null then
+         auxid_unidad :=  pidregion;
+   end if;
+   if pidempresa is not null and pidregion is not null and pidempresa = '100' then
+         auxid_unidad :=  pidregion;
+   end if;         
+   
+   select id_pais Into Vid_pais from m4_empresas where id_empresa = pidempresa;
+   
+   if psource = 'N' then   
+      open cur_empnom ( auxid_empleado, auxid_unidad);                                                                       --abre lectura de empleados
+      fetch cur_empnom into dat_empnom;
+      while cur_empnom%found loop
+        exit when cur_empnom%notfound;
+   
+          begin
+             insert into m4_hcm_payroll_files (id_sociedad, id_empleado, id_tipo_documento, fec_inicio, fec_fin, nombre_file_fisico, io_status)
+                         values ( dat_empnom.id_sociedad, dat_empnom.id_empleado, dat_empnom.TipoDocto, dat_empnom.fec_pago, dat_empnom.Fec_fin, dat_empnom.nom_arcivo, 3);
+          exception
+             when others then
+               if pfecpago = to_date('01052021','ddmmyyyy') then
+                   insert into m4_hcm_payroll_files (id_sociedad, id_empleado, id_tipo_documento, fec_inicio, fec_fin, nombre_file_fisico, io_status)
+                               values ( dat_empnom.id_sociedad, dat_empnom.id_empleado, dat_empnom.TipoDocto, dat_empnom.fec_pago + 1, dat_empnom.Fec_fin, dat_empnom.nom_arcivo, 3);
+               end if;
+          end;
+   
+            fetch cur_empnom into dat_empnom;   
+         end loop;
+         close cur_empnom;                     
+   else
+       if psource = 'R' and Vid_pais = '170'  then  
+          dbms_output.put_line('NO HABILITADO EN MX');
+--         open cur_empret ( auxid_empleado, auxid_unidad);                                                                       --abre lectura de empleados
+--         fetch cur_empret into dat_empret;
+--         while cur_empret%found loop
+--           exit when cur_empret%notfound;
+--      
+--             insert into m4_hcm_payroll_files (id_sociedad, id_empleado, id_tipo_documento, fec_inicio, fec_fin, nombre_file_fisico, io_status)
+--                            values ( dat_empret.id_sociedad, dat_empret.id_empleado, dat_empret.TipoDocto, dat_empret.cas_30_fec_ini, dat_empret.Fec_fin, dat_empret.nom_archivo, 3);
+--      
+--               fetch cur_empret into dat_empret;   
+--            end loop;
+--            close cur_empret;   
+       Else
+          if psource = 'R' and Vid_pais = '100'  then  
+            open cur_emprmx ( auxid_empleado, auxid_unidad);                                                                       --abre lectura de empleados
+            fetch cur_emprmx into dat_empret_mx;
+            while cur_emprmx%found loop
+              exit when cur_emprmx%notfound;
+         
+                insert into m4_hcm_payroll_files (id_sociedad, id_empleado, id_tipo_documento, fec_inicio, fec_fin, nombre_file_fisico, io_status)
+                               values ( dat_empret_mx.id_sociedad, dat_empret_mx.id_empleado, dat_empret_mx.TipoDocto, dat_empret_mx.FEC_INI_37, dat_empret_mx.Fec_fin, dat_empret_mx.nom_archivo, 3);
+         
+                  fetch cur_emprmx into dat_empret_mx;   
+               end loop;
+               close cur_emprmx;   
+          else
+            open cur_empnomfin ( auxid_empleado, auxid_unidad);                                                                       --abre lectura de empleados
+            fetch cur_empnomfin into dat_empnomfin;
+            while cur_empnomfin%found loop
+              exit when cur_empnomfin%notfound;
+         
+                insert into m4_hcm_payroll_files (id_sociedad, id_empleado, id_tipo_documento, fec_inicio, fec_fin, nombre_file_fisico, io_status)
+                               values ( dat_empnomfin.id_sociedad, dat_empnomfin.id_empleado, dat_empnomfin.TipoDocto, dat_empnomfin.fec_pago, dat_empnomfin.Fec_fin, dat_empnomfin.nom_arcivo, 3);
+         
+                  fetch cur_empnomfin into dat_empnomfin;   
+               end loop;
+               close cur_empnomfin;  
+          end if;    
+      End if;
+   end if;                  
+   
+exception
+   when others then
+      rollback;
+      dbms_output.put_line('Error general:' || xubicamensaje);
+      raise_application_error(-20010, sqlerrm || ' ' || xubicamensaje);
+end;
+/
