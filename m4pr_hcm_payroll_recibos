@@ -4,7 +4,8 @@ CREATE OR REPLACE PROCEDURE M4PR_HCM_PAYROLL_RECIBOS(
                             pidempresa      varchar2,
                             pidregion       varchar2,
                             pidempleado     varchar2,
-                            psource         varchar2)
+                            psource         varchar2,
+                            pepito varchar2)
    /* ____________________________________________________________________________________________________________________
       --.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.--.
        objetivo       : Este procedimiento generará la información de control de los timbrados y la póliza contable electrónica
